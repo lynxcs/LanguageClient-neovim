@@ -2,6 +2,7 @@ use super::*;
 use crate::lsp::notification::Notification;
 use crate::lsp::request::GotoDefinitionResponse;
 use crate::lsp::request::Request;
+use crate::rpcclient::{self, RpcClient};
 
 impl State {
     /////// Utils ///////
@@ -2903,5 +2904,48 @@ impl State {
         self.echo(&msg)?;
         info!("End {}", REQUEST__DebugInfo);
         Ok(json!(msg))
+    }
+}
+
+impl actix::Message for Call {
+    type Result = Fallible<Value>;
+}
+
+pub struct LanguageClient {
+    addrs: HashMap<LanguageId, Addr<RpcClient>>,
+    state: State,
+}
+
+impl LanguageClient {
+    pub fn new() -> Fallible<Self> {
+        Ok(LanguageClient {
+            addrs: HashMap::new(),
+            state: State::new()?,
+        })
+    }
+}
+
+impl actix::Actor for LanguageClient {
+    type Context = actix::Context<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        // TODO: no unwrap.
+        let main = rpcclient::RpcClient::new(
+            None,
+            BufReader::new(std::io::stdin()),
+            BufWriter::new(std::io::stdout()),
+            ctx.address(),
+        ).unwrap()
+        .start();
+        self.addrs.insert(None, main);
+    }
+}
+
+impl actix::Handler<Call> for LanguageClient {
+    type Result = Fallible<Value>;
+
+    fn handle(&mut self, msg: Call, ctx: &mut actix::Context<Self>) -> Self::Result {
+        info!("Handling {:?}", msg);
+        Ok(json!({}))
     }
 }

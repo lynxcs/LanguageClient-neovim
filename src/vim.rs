@@ -341,7 +341,7 @@ impl State {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
-enum RawMessage {
+pub enum RawMessage {
     Notification(rpc::Notification),
     MethodCall(rpc::MethodCall),
     Output(rpc::Output),

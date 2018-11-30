@@ -69,6 +69,7 @@ impl SyncWrite for BufWriter<ChildStdin> {}
 impl SyncWrite for BufWriter<TcpStream> {}
 
 pub type Id = u64;
+pub type LanguageId = Option<String>;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Message {

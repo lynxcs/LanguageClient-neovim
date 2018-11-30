@@ -15,6 +15,9 @@ use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+extern crate actix;
+use actix::{Actor, Addr, AsyncContext};
+
 #[macro_use]
 extern crate log;
 extern crate log4rs;
@@ -70,6 +73,8 @@ mod logger;
 mod rpchandler;
 mod vim;
 
+mod rpcclient;
+
 #[derive(Debug, StructOpt)]
 struct Arguments {}
 
@@ -78,19 +83,8 @@ fn main() -> Fallible<()> {
     let args = Arguments::clap().version(version.as_str());
     let _ = args.get_matches();
 
-    let mut state = State::new()?;
-
-    let tx = state.tx.clone();
-    let reader_thread_name: String = "reader-main".into();
-    thread::Builder::new()
-        .name(reader_thread_name.clone())
-        .spawn(move || {
-            let stdin = std::io::stdin();
-            let stdin = stdin.lock();
-            if let Err(err) = vim::loop_reader(stdin, &None, &tx) {
-                error!("{} exited: {:?}", reader_thread_name, err);
-            }
-        })?;
-
-    state.loop_message()
+    let system = actix::System::new("system");
+    let language_client = languageclient::LanguageClient::new()?.start();
+    system.run();
+    Ok(())
 }
