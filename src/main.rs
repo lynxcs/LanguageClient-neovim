@@ -11,9 +11,11 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, ChildStdout, Stdio};
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
+use std::ops::DerefMut;
 
 extern crate actix;
 use actix::{Actor, Addr, AsyncContext};

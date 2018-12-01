@@ -2907,21 +2907,58 @@ impl State {
     }
 }
 
-impl actix::Message for Call {
-    type Result = Fallible<Value>;
+pub trait StateExt {
+    fn get<T>(&self, f: impl FnOnce(&State) -> Fallible<T>) -> Fallible<T>;
+    fn update<T>(&self, f: impl FnOnce(&mut State) -> Fallible<T>) -> Fallible<T>;
 }
 
-pub struct LanguageClient {
-    addrs: HashMap<LanguageId, Addr<RpcClient>>,
-    state: State,
+impl StateExt for Arc<Mutex<State>> {
+    fn get<T>(&self, f: impl FnOnce(&State) -> Fallible<T>) -> Fallible<T>
+    {
+        let state = self.lock().map_err(|err| format_err!("Failed to lock addrs: {:?}", err))?;
+	let state = state.deref();
+        f(state)
+    }
+
+    fn update<T>(&self, f: impl FnOnce(&mut State) -> Fallible<T>) -> Fallible<T>
+    {
+        let mut state = self.lock().map_err(|err| format_err!("Failed to lock addrs: {:?}", err))?;
+	let mut state = state.deref_mut();
+
+        let v = if log_enabled!(log::Level::Debug) {
+            let s = serde_json::to_string(&state)?;
+            serde_json::from_str(&s)?
+        } else {
+            Value::default()
+        };
+
+        let result = f(&mut state);
+
+        let next_v = if log_enabled!(log::Level::Debug) {
+            let s = serde_json::to_string(&state)?;
+            serde_json::from_str(&s)?
+        } else {
+            Value::default()
+        };
+
+        for (k, (v1, v2)) in diff_value(&v, &next_v, "state") {
+            debug!("{}: {} ==> {}", k, v1, v2);
+        }
+        result
+    }
 }
+
+impl actix::Message for Call {
+    type Result = Fallible<()>;
+}
+
+pub struct LanguageClient(Arc<Mutex<State>>);
 
 impl LanguageClient {
     pub fn new() -> Fallible<Self> {
-        Ok(LanguageClient {
-            addrs: HashMap::new(),
-            state: State::new()?,
-        })
+        Ok(LanguageClient(
+            Arc::new(Mutex::new(State::new()?)),
+        ))
     }
 }
 
@@ -2937,15 +2974,16 @@ impl actix::Actor for LanguageClient {
             ctx.address(),
         ).unwrap()
         .start();
-        self.addrs.insert(None, main);
+        self.0.update(|state| {
+            Ok(state.addrs.insert(None, main))
+        }).unwrap();
     }
 }
 
 impl actix::Handler<Call> for LanguageClient {
-    type Result = Fallible<Value>;
+    type Result = Fallible<()>;
 
     fn handle(&mut self, msg: Call, ctx: &mut actix::Context<Self>) -> Self::Result {
-        info!("Handling {:?}", msg);
-        Ok(json!({}))
+        Ok(())
     }
 }
