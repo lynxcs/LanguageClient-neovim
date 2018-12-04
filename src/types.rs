@@ -1,4 +1,5 @@
 use super::*;
+use crate::languageclient::LanguageClient;
 use crate::rpcclient::RpcClient;
 
 pub type Fallible<T> = failure::Fallible<T>;
@@ -94,6 +95,9 @@ pub struct HighlightSource {
 #[derive(Serialize)]
 pub struct State {
     #[serde(skip_serializing)]
+    pub addr: Option<Addr<LanguageClient>>,
+
+    #[serde(skip_serializing)]
     pub addrs: HashMap<LanguageId, Addr<RpcClient>>,
 
     // Program state.
@@ -169,6 +173,7 @@ impl State {
         let (tx, rx) = channel();
 
         Ok(State {
+            addr: None,
             addrs: HashMap::new(),
 
             id: 0,

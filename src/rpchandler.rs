@@ -1,22 +1,22 @@
 use super::*;
+use crate::languageclientworker::LanguageClientWorker;
 use crate::lsp::notification::Notification;
 use crate::lsp::request::Request;
 
-impl State {
+impl LanguageClientWorker {
     pub fn handle_method_call(
-        &mut self,
+        &self,
         languageId: Option<&str>,
         method_call: &rpc::MethodCall,
     ) -> Fallible<Value> {
         let params = serde_json::to_value(method_call.params.clone())?;
 
-        let user_handler = self.get(|state| {
-            state
-                .user_handlers
-                .get(&method_call.method)
-                .cloned()
-                .ok_or_else(|| err_msg("No user handler"))
-        });
+        let user_handler = self
+            .lock()?
+            .user_handlers
+            .get(&method_call.method)
+            .cloned()
+            .ok_or_else(|| err_msg("No user handler"));
         if let Ok(user_handler) = user_handler {
             return self.call(None, &user_handler, params);
         }
@@ -83,13 +83,13 @@ impl State {
                     Some(languageId_target)
                 };
 
-                self.call(languageId_target.as_deref(), &method_call.method, &params)
+                self.call(languageId_target, &method_call.method, &params)
             }
         }
     }
 
     pub fn handle_notification(
-        &mut self,
+        &self,
         languageId: Option<&str>,
         notification: &rpc::Notification,
     ) -> Fallible<()> {
@@ -167,7 +167,7 @@ impl State {
                     Some(languageId_target)
                 };
 
-                self.notify(languageId_target.as_deref(), &notification.method, &params)?;
+                self.notify(languageId_target, &notification.method, &params)?;
             }
         };
 

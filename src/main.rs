@@ -8,17 +8,20 @@ use std::io::prelude::*;
 use std::io::{BufRead, BufReader, BufWriter};
 use std::net::TcpStream;
 use std::ops::Deref;
+use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, ChildStdout, Stdio};
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
-use std::ops::DerefMut;
 
 extern crate actix;
-use actix::{Actor, Addr, AsyncContext};
+use actix::{Actor, ActorContext, Addr, AsyncContext};
+
+extern crate futures;
+use futures::Future;
 
 #[macro_use]
 extern crate log;
@@ -71,6 +74,7 @@ use crate::types::*;
 mod utils;
 use crate::utils::*;
 mod languageclient;
+mod languageclientworker;
 mod logger;
 mod rpchandler;
 mod vim;

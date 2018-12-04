@@ -43,7 +43,10 @@ fn create_config(path: &Option<String>, level: LevelFilter) -> Fallible<Config> 
 }
 
 pub fn init() -> Fallible<Handle> {
-    let handle = log4rs::init_config(create_config(&None, LevelFilter::Warn)?)?;
+    let handle = log4rs::init_config(create_config(
+        &Some("/tmp/LanguageClient.log".into()),
+        LevelFilter::Info,
+    )?)?;
 
     Ok(handle)
 }

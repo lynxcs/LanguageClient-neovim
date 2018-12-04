@@ -3,13 +3,13 @@ use crate::languageclient::LanguageClient;
 use crate::vim;
 
 #[derive(Debug)]
-pub enum RawMessage<S: Serialize> {
-    MethodCall(S, S),
-    Notification(S, S),
-    Output(Id, Fallible<S>),
+pub enum RawMessage {
+    MethodCall(String, Value),
+    Notification(String, Value),
+    Output(Id, Fallible<Value>),
 }
 
-impl<S: Serialize> actix::Message for RawMessage<S> {
+impl actix::Message for RawMessage {
     type Result = Fallible<Value>;
 }
 
@@ -128,13 +128,10 @@ impl actix::Actor for RpcClient {
     type Context = actix::Context<Self>;
 }
 
-impl<S> actix::Handler<RawMessage<S>> for RpcClient
-where
-    S: Serialize,
-{
+impl actix::Handler<RawMessage> for RpcClient {
     type Result = Fallible<Value>;
 
-    fn handle(&mut self, msg: RawMessage<S>, ctx: &mut actix::Context<Self>) -> Self::Result {
+    fn handle(&mut self, msg: RawMessage, ctx: &mut actix::Context<Self>) -> Self::Result {
         let msg_rpc = match &msg {
             RawMessage::MethodCall(method, params) => {
                 self.id += 1;
