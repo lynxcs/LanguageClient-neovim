@@ -53,6 +53,7 @@ impl LanguageClientWorker {
     }
 
     fn sync_settings(&self) -> Fallible<()> {
+        info!("Begin sync settings");
         let (loggingFile, loggingLevel, serverStderr): (
             Option<String>,
             log::LevelFilter,
@@ -219,6 +220,7 @@ impl LanguageClientWorker {
             Ok(())
         })?;
 
+        info!("End sync settings");
         Ok(())
     }
 
@@ -2665,7 +2667,7 @@ impl LanguageClientWorker {
         let (languageId, filename): (String, String) =
             self.gather_args(&[VimVar::LanguageId, VimVar::Filename], &params)?;
 
-        if self.get(|state| Ok(state.writers.contains_key(&languageId)))? {
+        if self.lock()?.writers.contains_key(&languageId) {
             bail!(
                 "Language client has already started for language {}.",
                 &languageId
@@ -2673,6 +2675,7 @@ impl LanguageClientWorker {
         }
 
         self.sync_settings()?;
+        info!("settings synced");
 
         let command = self
             .lock()?
@@ -2962,6 +2965,8 @@ impl actix::Actor for LanguageClient {
         ).unwrap()
         .start();
         self.0.lock().unwrap().addrs.insert(None, vim);
+
+        info!("language client started!");
     }
 }
 
@@ -2970,7 +2975,7 @@ impl actix::Handler<Call> for LanguageClient {
 
     fn handle(&mut self, msg: Call, ctx: &mut actix::Context<Self>) -> Self::Result {
         let worker = LanguageClientWorker(self.0.clone()).start();
-        worker.do_send(msg);
+        worker.try_send(msg)?;
         Ok(())
     }
 }

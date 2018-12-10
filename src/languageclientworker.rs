@@ -100,11 +100,14 @@ impl LanguageClientWorker {
             .cloned()
             .ok_or_else(|| format_err!("Failed to get RpcClient addr for {:?}", languageId))?;
 
+        info!("addr: {}", addr.connected());
+
         let v = addr
             .send(rpcclient::RawMessage::MethodCall(
                 method.to_owned(),
                 serde_json::to_value(params)?,
             )).wait()??;
+        info!("{:?}", v);
         Ok(serde_json::from_value(v)?)
     }
 

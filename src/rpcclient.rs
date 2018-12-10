@@ -93,11 +93,11 @@ impl RpcClient {
                     match message {
                         vim::RawMessage::MethodCall(method_call) => {
                             language_client
-                                .do_send(Call::MethodCall(languageId.clone(), method_call));
+                                .try_send(Call::MethodCall(languageId.clone(), method_call))?;
                         }
                         vim::RawMessage::Notification(notification) => {
                             language_client
-                                .do_send(Call::Notification(languageId.clone(), notification));
+                                .try_send(Call::Notification(languageId.clone(), notification))?;
                         }
                         vim::RawMessage::Output(output) => {
                             tx.send(output)?;
@@ -105,6 +105,7 @@ impl RpcClient {
                     };
                 }
 
+                info!("reader-{:?} terminated", languageId);
                 Ok(())
             })?;
 
@@ -132,6 +133,7 @@ impl actix::Handler<RawMessage> for RpcClient {
     type Result = Fallible<Value>;
 
     fn handle(&mut self, msg: RawMessage, ctx: &mut actix::Context<Self>) -> Self::Result {
+        info!("RpcClient-{:?} handling message: {:?}", self.languageId, msg);
         let msg_rpc = match &msg {
             RawMessage::MethodCall(method, params) => {
                 self.id += 1;
