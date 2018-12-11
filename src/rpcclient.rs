@@ -1,23 +1,16 @@
 use super::*;
 use crate::languageclient::LanguageClient;
 use crate::vim;
+use crate::types::{Call, Lock};
+use futures::sync::oneshot;
+use std::sync::mpsc;
 
-#[derive(Debug)]
-pub enum RawMessage {
-    MethodCall(String, Value),
-    Notification(String, Value),
-    Output(Id, Fallible<Value>),
-}
-
-impl actix::Message for RawMessage {
-    type Result = Fallible<Value>;
-}
-
+#[derive(Clone)]
 pub struct RpcClient {
     languageId: LanguageId,
-    id: Id,
-    writer: Box<Write>,
-    rx: Receiver<rpc::Output>,
+    id: Arc<Mutex<Id>>,
+    writer: Arc<Mutex<Write>>,
+    tx: mpsc::Sender<(Id, oneshot::Sender<rpc::Output>)>,
 }
 
 impl RpcClient {
@@ -25,7 +18,7 @@ impl RpcClient {
         languageId: LanguageId,
         reader: impl BufRead + Send + 'static,
         writer: impl Write + 'static,
-        language_client: actix::Addr<LanguageClient>,
+        sink: mpsc::Sender<rpc::Call>,
     ) -> Fallible<Self> {
         let (tx, rx) = channel();
 
@@ -34,6 +27,7 @@ impl RpcClient {
             .name(format!("reader-{:?}", languageId))
             .spawn(move || {
                 let languageId = languageId_clone;
+                let pending_outputs = HashMap::new();
 
                 // Count how many consequent empty lines.
                 let mut count_empty_lines = 0;
@@ -41,6 +35,16 @@ impl RpcClient {
                 let mut reader = reader;
                 let mut content_length = 0;
                 loop {
+                    match rx.try_recv() {
+                        Ok((id, tx)) => {
+                            pending_outputs.insert(id, tx);
+                        }
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            break;
+                        },
+                        Err(mpsc::TryRecvError::Empty) => {}
+                    }
+
                     let mut message = String::new();
                     let mut line = String::new();
                     if languageId.is_some() {
@@ -92,15 +96,15 @@ impl RpcClient {
                     let message = message.unwrap();
                     match message {
                         vim::RawMessage::MethodCall(method_call) => {
-                            language_client
-                                .try_send(Call::MethodCall(languageId.clone(), method_call))?;
+                            sink.send(Call::MethodCall(languageId.clone(), method_call))?;
                         }
                         vim::RawMessage::Notification(notification) => {
-                            language_client
-                                .try_send(Call::Notification(languageId.clone(), notification))?;
+                            sink.send(Call::Notification(languageId.clone(), notification))?;
                         }
                         vim::RawMessage::Output(output) => {
-                            tx.send(output)?;
+                            if let Some(tx) = pending_outputs.remove(output.id().to_int()?) {
+                                tx.send(output)?;
+                            }
                         }
                     };
                 }
@@ -111,79 +115,66 @@ impl RpcClient {
 
         Ok(RpcClient {
             languageId,
-            id: 0,
-            writer: Box::new(writer),
-            rx,
+            id: Arc::new(Mutex::new(0)),
+            writer: Arc::new(Mutex::new(writer)),
+            tx,
         })
     }
 
-    fn write(&mut self, message: &impl Serialize) -> Fallible<()> {
+    fn write(&self, message: &impl Serialize) -> Fallible<()> {
         let s = serde_json::to_string(message)?;
         info!("=> {:?} {}", self.languageId, s);
-        write!(self.writer, "Content-Length: {}\r\n\r\n{}", s.len(), s)?;
+        write!(self.writer.lock()?, "Content-Length: {}\r\n\r\n{}", s.len(), s)?;
         Ok(())
     }
-}
 
-impl actix::Actor for RpcClient {
-    type Context = actix::Context<Self>;
-}
+    fn call<R: DeserializeOwned>(&self, method: &impl AsRef<str>, params: &impl Serialize) -> Fallible<R> {
+        let method = method.as_ref();
+        let id = {
+            id = self.id.lock()?;
+            id += 1;
+            id
+        };
+        let msg = rpc::MethodCall {
+            jsonrpc: Some(rpc::Version::V2),
+            id: rpc::Id::Num(id),
+            method: method.to_owned(),
+            params: params.to_params()?,
+        };
+        let (tx, rx) = oneshot::channel();
+        self.tx.send((id, tx))?;
+        self.write(&msg)?;
+        match rx.wait()? {
+            rpc::Output::Success(ok) => Ok(serde_json::from_value(ok.result)?),
+            rpc::Output::Failure(err) => bail!("Error: {:?}", err),
+        }
+    }
 
-impl actix::Handler<RawMessage> for RpcClient {
-    type Result = Fallible<Value>;
+    fn notify(&self, method: &impl AsRef<str>, params: &impl Serialize) -> Fallible<()> {
+        let method = method.as_ref();
 
-    fn handle(&mut self, msg: RawMessage, ctx: &mut actix::Context<Self>) -> Self::Result {
-        info!("RpcClient-{:?} handling message: {:?}", self.languageId, msg);
-        let msg_rpc = match &msg {
-            RawMessage::MethodCall(method, params) => {
-                self.id += 1;
-                vim::RawMessage::MethodCall(rpc::MethodCall {
-                    jsonrpc: Some(rpc::Version::V2),
-                    id: rpc::Id::Num(self.id),
-                    method: serde_json::to_string(method)?,
-                    params: params.to_params()?,
-                })
-            }
-            RawMessage::Notification(method, params) => {
-                vim::RawMessage::Notification(rpc::Notification {
-                    jsonrpc: Some(rpc::Version::V2),
-                    method: serde_json::to_string(method)?,
-                    params: params.to_params()?,
-                })
-            }
-            RawMessage::Output(id, result) => match result {
-                Ok(ok) => vim::RawMessage::Output(rpc::Output::Success(rpc::Success {
-                    jsonrpc: Some(rpc::Version::V2),
-                    id: rpc::Id::Num(*id),
-                    result: serde_json::to_value(ok)?,
-                })),
-                Err(err) => vim::RawMessage::Output(rpc::Output::Failure(rpc::Failure {
-                    jsonrpc: Some(rpc::Version::V2),
-                    id: rpc::Id::Num(*id),
-                    error: err.to_rpc_error(),
-                })),
-            },
+        let msg = rpc::Notification {
+            jsonrpc: Some(rpc::Version::V2),
+            method: method.to_owned(),
+            params: params.to_params()?,
+        };
+        self.write(&msg)
+    }
+
+    fn output(&self, id: &Id, result: Fallible<impl Serialize>) -> Fallible<()> {
+        let output = match result {
+            Ok(ok) => vim::RawMessage::Output(rpc::Output::Success(rpc::Success {
+                jsonrpc: Some(rpc::Version::V2),
+                id: rpc::Id::Num(*id),
+                result: serde_json::to_value(ok)?,
+            })),
+            Err(err) => vim::RawMessage::Output(rpc::Output::Failure(rpc::Failure {
+                jsonrpc: Some(rpc::Version::V2),
+                id: rpc::Id::Num(*id),
+                error: err.to_rpc_error(),
+            })),
         };
 
-        self.write(&msg_rpc)?;
-
-        if let RawMessage::MethodCall(_, _) = &msg {
-            loop {
-                let output = self.rx.recv()?;
-                if output.id() != &rpc::Id::Num(self.id) {
-                    error!("Unexpcted output: {:?}", output);
-                    continue;
-                }
-
-                match self.rx.recv()? {
-                    rpc::Output::Success(success) => return Ok(success.result),
-                    rpc::Output::Failure(failure) => {
-                        return Err(format_err!("{}", failure.error.message))
-                    }
-                }
-            }
-        } else {
-            Ok(Value::Null)
-        }
+        self.write(&output)
     }
 }

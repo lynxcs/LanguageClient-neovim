@@ -75,15 +75,15 @@ pub type LanguageId = Option<String>;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Message {
-    MethodCall(Option<String>, rpc::MethodCall),
-    Notification(Option<String>, rpc::Notification),
+    MethodCall(LanguageId, rpc::MethodCall),
+    Notification(LanguageId, rpc::Notification),
     Output(rpc::Output),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Call {
-    MethodCall(Option<String>, rpc::MethodCall),
-    Notification(Option<String>, rpc::Notification),
+    MethodCall(LanguageId, rpc::MethodCall),
+    Notification(LanguageId, rpc::Notification),
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -1080,5 +1080,16 @@ impl FromLSP<SymbolInformation> for QuickfixEntry {
             nr: None,
             typ: None,
         })
+    }
+}
+
+pub trait Lock {
+    fn lock<T>(&self) -> Fallible<MutexGuard<T>>;
+}
+
+impl<T> Lock for Mutex<T> {
+    fn lock(&self) -> Fallible<MutexGuard<T>> {
+        Mutex::lock(self)
+            .map_err(|| err_msg("Failed to lock!"))
     }
 }
