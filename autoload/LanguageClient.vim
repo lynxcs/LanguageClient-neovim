@@ -36,6 +36,34 @@ endfunction
 " `echo` message without trigger |hit-enter|
 function! s:EchoEllipsis(message) abort
     echo s:Ellipsis(a:message)
+
+    if !has('nvim-0.3.2') || get(g:, 'LanguageClient_showVirtualText', 0) != 1
+        return
+    endif
+
+    if a:message == ""
+        call nvim_buf_clear_highlight(bufnr(''), 1000, 0, -1)
+        return
+    endif
+
+    let l:message = get(g:, 'LanguageClient_virtualTextPrefix', '> ') . a:message
+    let l:message = substitute(l:message, "\t", ' ', 'g')
+    let l:message = substitute(l:message, "\n", '', 'g')
+
+    let l:hlgroup = ""
+    if l:message =~ '\[Error\]'
+        let l:hlgroup = "ALEError"
+        let l:message = substitute(l:message, '[error\][0-9]\+\]', "", 'g')
+    elseif l:message =~ '\[Warning\]'
+        let l:hlgroup = "ALEWarning"
+        let l:message = substitute(l:message, '[warning\][0-9]\+\]', "", 'g')
+    elseif l:message =~ '\[Information\]'
+        let l:hlgroup = "ALEInfo"
+        let l:message = substitute(l:message, '[information\][0-9]\+\]', "", 'g')
+    endif
+
+    call nvim_buf_clear_highlight(bufnr(''), 1000, 0, -1)
+    call nvim_buf_set_virtual_text(bufnr(''), 1000, line('.')-1, [[l:message, l:hlgroup]], {})
 endfunction
 
 " `echomsg` message without trigger |hit-enter|
